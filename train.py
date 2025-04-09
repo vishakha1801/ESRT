@@ -14,6 +14,7 @@ import wandb
 from importlib import import_module
 # os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
+# This is the entry point
 # Training settings
 parser = argparse.ArgumentParser(description="ESRT")
 parser.add_argument("--batch_size", type=int, default=16,
@@ -58,6 +59,7 @@ parser.add_argument("--isY", action="store_true", default=True)
 parser.add_argument("--ext", type=str, default='.npy')
 parser.add_argument("--phase", type=str, default='train')
 parser.add_argument("--model", type=str, default='ESRT')
+#  No need for tests
 
 args = parser.parse_args()
 print(args)
@@ -77,7 +79,10 @@ print("===> DEVICE: ", device)
 
 print("===> Loading datasets")
 
+# Training Dataset
 trainset = DIV2K.div2k(args)
+# Test Dataset
+# HR, LR
 testset = Set5_val.DatasetFromFolderVal("Test_Datasets/Set5/",
                                        "Test_Datasets/Set5_LR/x{}/".format(args.scale),
                                        args.scale)
@@ -134,6 +139,7 @@ config = {
 }
 
 run = wandb.init(
+    #  add name here for label
     name = "attempt3", ## Wandb creates random run names if you skip this field
     reinit = True, ### Allows reinitalizing runs when you re-run this cell
     # run_id = ### Insert specific run id here if you want to resume a previous run
