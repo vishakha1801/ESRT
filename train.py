@@ -94,7 +94,7 @@ print("===> Building models")
 args.is_train = True
 
 
-model = esrt.ESRT(upscale = args.scale)#architecture.IMDN(upscale=args.scale)
+model = esrt.ESRT(upscale = args.scale) #architecture.IMDN(upscale=args.scale)
 
 l1_criterion = nn.L1Loss()
 
@@ -261,7 +261,28 @@ def save_checkpoint(epoch):
     if not os.path.exists(model_folder):
         os.makedirs(model_folder)
     torch.save(model.state_dict(), model_out_path)
+
     print("===> Checkpoint saved to {}".format(model_out_path))
+
+
+def save_best_psnr():
+    model_folder = "experiment/checkpoint_ESRT_x{}/".format(args.scale)
+    model_out_path = model_folder + "best_psnr.pth"
+    if not os.path.exists(model_folder):
+        os.makedirs(model_folder)
+    torch.save(model.state_dict(), model_out_path)
+
+    print("===> BEST PSNR Checkpoint saved to {}".format(model_out_path))
+
+
+def save_best_ssim():
+    model_folder = "experiment/checkpoint_ESRT_x{}/".format(args.scale)
+    model_out_path = model_folder + "best_ssir.pth"
+    if not os.path.exists(model_folder):
+        os.makedirs(model_folder)
+    torch.save(model.state_dict(), model_out_path)
+
+    print("===> BEST SSIR Checkpoint saved to {}".format(model_out_path))
 
 def print_network(net):
     num_params = 0
@@ -274,6 +295,8 @@ print("===> Training")
 print_network(model)
 code_start = datetime.datetime.now()
 timer = utils.Timer()
+best_psnr = 0
+best_ssim = 0
 for epoch in range(args.start_epoch, args.nEpochs + 1):
     t_epoch_start = timer.t()
     epoch_start = datetime.datetime.now()
@@ -281,6 +304,15 @@ for epoch in range(args.start_epoch, args.nEpochs + 1):
     train_loss_for_epoch = train(epoch)
     if epoch % 10 == 0:
         save_checkpoint(epoch)
+
+    if psnr > best_psnr:
+        best_psnr = psnr
+        save_best_psnr()
+
+    if ssim > best_ssim:
+        best_ssim = ssim
+        save_best_ssim()
+
     epoch_end = datetime.datetime.now()
     print('Epoch cost times: %s' % str(epoch_end-epoch_start))
     t = timer.t()
