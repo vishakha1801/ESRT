@@ -178,7 +178,10 @@ def train(epoch) -> float:
             print("===> Epoch[{}]({}/{}): Loss_l1: {:.5f}".format(epoch, iteration, len(training_data_loader), loss_l1.item()))
     return total_loss / len(training_data_loader)
 
+<<<<<<< Updated upstream
 # FIXED forward_chop function for better handling of different scale factors
+=======
+>>>>>>> Stashed changes
 def forward_chop(model, x, scale, shave=10, min_size=60000):
     """Modified forward_chop that handles different scales better"""
     try:
@@ -215,28 +218,62 @@ def forward_chop(model, x, scale, shave=10, min_size=60000):
         h_half_out, w_half_out = scale * h_half, scale * w_half
         h_size_out, w_size_out = scale * h_size, scale * w_size
         
+<<<<<<< Updated upstream
         # Create output tensor
         output = x.new(b, c, h_out, w_out)
         
         # Properly handle the overlapping regions from each patch
+=======
+        # Create a new tensor directly instead of using x.new()
+        output = torch.zeros(b, c, h_out, w_out, device=x.device)
+        
+        # Ensure all dimensions are valid
+        h_half_out = min(h_half_out, sr_list[0].size(2))
+        w_half_out = min(w_half_out, sr_list[0].size(3))
+        
+>>>>>>> Stashed changes
         # For top-left patch (0)
         output[:, :, 0:h_half_out, 0:w_half_out] = sr_list[0][:, :, 0:h_half_out, 0:w_half_out]
         
         # For top-right patch (1)
+<<<<<<< Updated upstream
         # Note the careful handling of indices to avoid index out of bounds
         w_size_right = min(w_size_out, sr_list[1].size(3))
         right_offset = max(0, w_size_out - (w_out - w_half_out))
         output[:, :, 0:h_half_out, w_half_out:w_out] = sr_list[1][:, :, 0:h_half_out, right_offset:right_offset+(w_out-w_half_out)]
+=======
+        w_size_right = min(w_size_out, sr_list[1].size(3))
+        right_offset = max(0, w_size_out - (w_out - w_half_out))
+        right_slice_width = min(w_out - w_half_out, sr_list[1].size(3) - right_offset)
+        
+        output[:, :, 0:h_half_out, w_half_out:w_half_out+right_slice_width] = \
+            sr_list[1][:, :, 0:h_half_out, right_offset:right_offset+right_slice_width]
+>>>>>>> Stashed changes
         
         # For bottom-left patch (2)
         h_size_bottom = min(h_size_out, sr_list[2].size(2))
         bottom_offset = max(0, h_size_out - (h_out - h_half_out))
+<<<<<<< Updated upstream
         output[:, :, h_half_out:h_out, 0:w_half_out] = sr_list[2][:, :, bottom_offset:bottom_offset+(h_out-h_half_out), 0:w_half_out]
         
         # For bottom-right patch (3)
         output[:, :, h_half_out:h_out, w_half_out:w_out] = sr_list[3][:, :, 
                                                                     bottom_offset:bottom_offset+(h_out-h_half_out), 
                                                                     right_offset:right_offset+(w_out-w_half_out)]
+=======
+        bottom_slice_height = min(h_out - h_half_out, sr_list[2].size(2) - bottom_offset)
+        
+        output[:, :, h_half_out:h_half_out+bottom_slice_height, 0:w_half_out] = \
+            sr_list[2][:, :, bottom_offset:bottom_offset+bottom_slice_height, 0:w_half_out]
+        
+        # For bottom-right patch (3)
+        # Ensure we don't go out of bounds with carefully calculated slice dimensions
+        bottom_right_h = min(h_out - h_half_out, sr_list[3].size(2) - bottom_offset)
+        bottom_right_w = min(w_out - w_half_out, sr_list[3].size(3) - right_offset)
+        
+        output[:, :, h_half_out:h_half_out+bottom_right_h, w_half_out:w_half_out+bottom_right_w] = \
+            sr_list[3][:, :, bottom_offset:bottom_offset+bottom_right_h, right_offset:right_offset+bottom_right_w]
+>>>>>>> Stashed changes
         
         return output
     except Exception as e:
