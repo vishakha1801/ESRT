@@ -178,46 +178,72 @@ def train(epoch) -> float:
             print("===> Epoch[{}]({}/{}): Loss_l1: {:.5f}".format(epoch, iteration, len(training_data_loader), loss_l1.item()))
     return total_loss / len(training_data_loader)
 
-def forward_chop(model, x, scale, shave=0, min_size=60000):
-    # scale = scale#self.scale[self.idx_scale]
-    n_GPUs = 1#min(self.n_GPUs, 4)
-    b, c, h, w = x.size()
-    h_half, w_half = h // 2, w // 2
-    h_size, w_size = h_half + shave, w_half + shave
-    lr_list = [
-        x[:, :, 0:h_size, 0:w_size],
-        x[:, :, 0:h_size, (w - w_size):w],
-        x[:, :, (h - h_size):h, 0:w_size],
-        x[:, :, (h - h_size):h, (w - w_size):w]]
+# FIXED forward_chop function for better handling of different scale factors
+def forward_chop(model, x, scale, shave=10, min_size=60000):
+    """Modified forward_chop that handles different scales better"""
+    try:
+        n_GPUs = 1
+        b, c, h, w = x.size()
+        h_half, w_half = h // 2, w // 2
+        h_size, w_size = h_half + shave, w_half + shave
+        
+        # Make sure h_size and w_size don't exceed the image dimensions
+        h_size = min(h, h_size)
+        w_size = min(w, w_size)
+        
+        # Create the four patches
+        lr_list = [
+            x[:, :, 0:h_size, 0:w_size],
+            x[:, :, 0:h_size, (w - w_size):w],
+            x[:, :, (h - h_size):h, 0:w_size],
+            x[:, :, (h - h_size):h, (w - w_size):w]]
 
-    if w_size * h_size < min_size:
-        sr_list = []
-        for i in range(0, 4, n_GPUs):
-            lr_batch = torch.cat(lr_list[i:(i + n_GPUs)], dim=0)
-            sr_batch = model(lr_batch)
-            sr_list.extend(sr_batch.chunk(n_GPUs, dim=0))
-    else:
-        sr_list = [
-            forward_chop(model, patch, shave=shave, min_size=min_size) \
-            for patch in lr_list
-        ]
+        if w_size * h_size < min_size:
+            sr_list = []
+            for i in range(0, 4, n_GPUs):
+                lr_batch = torch.cat(lr_list[i:(i + n_GPUs)], dim=0)
+                sr_batch = model(lr_batch)
+                sr_list.extend(sr_batch.chunk(n_GPUs, dim=0))
+        else:
+            sr_list = [
+                forward_chop(model, patch, scale=scale, shave=shave, min_size=min_size) \
+                for patch in lr_list
+            ]
 
-    h, w = scale * h, scale * w
-    h_half, w_half = scale * h_half, scale * w_half
-    h_size, w_size = scale * h_size, scale * w_size
-    shave *= scale
-
-    output = x.new(b, c, h, w)
-    output[:, :, 0:h_half, 0:w_half] \
-        = sr_list[0][:, :, 0:h_half, 0:w_half]
-    output[:, :, 0:h_half, w_half:w] \
-        = sr_list[1][:, :, 0:h_half, (w_size - w + w_half):w_size]
-    output[:, :, h_half:h, 0:w_half] \
-        = sr_list[2][:, :, (h_size - h + h_half):h_size, 0:w_half]
-    output[:, :, h_half:h, w_half:w] \
-        = sr_list[3][:, :, (h_size - h + h_half):h_size, (w_size - w + w_half):w_size]
-
-    return output
+        # Scale up dimensions
+        h_out, w_out = scale * h, scale * w
+        h_half_out, w_half_out = scale * h_half, scale * w_half
+        h_size_out, w_size_out = scale * h_size, scale * w_size
+        
+        # Create output tensor
+        output = x.new(b, c, h_out, w_out)
+        
+        # Properly handle the overlapping regions from each patch
+        # For top-left patch (0)
+        output[:, :, 0:h_half_out, 0:w_half_out] = sr_list[0][:, :, 0:h_half_out, 0:w_half_out]
+        
+        # For top-right patch (1)
+        # Note the careful handling of indices to avoid index out of bounds
+        w_size_right = min(w_size_out, sr_list[1].size(3))
+        right_offset = max(0, w_size_out - (w_out - w_half_out))
+        output[:, :, 0:h_half_out, w_half_out:w_out] = sr_list[1][:, :, 0:h_half_out, right_offset:right_offset+(w_out-w_half_out)]
+        
+        # For bottom-left patch (2)
+        h_size_bottom = min(h_size_out, sr_list[2].size(2))
+        bottom_offset = max(0, h_size_out - (h_out - h_half_out))
+        output[:, :, h_half_out:h_out, 0:w_half_out] = sr_list[2][:, :, bottom_offset:bottom_offset+(h_out-h_half_out), 0:w_half_out]
+        
+        # For bottom-right patch (3)
+        output[:, :, h_half_out:h_out, w_half_out:w_out] = sr_list[3][:, :, 
+                                                                    bottom_offset:bottom_offset+(h_out-h_half_out), 
+                                                                    right_offset:right_offset+(w_out-w_half_out)]
+        
+        return output
+    except Exception as e:
+        print(f"Error in forward_chop: {str(e)}")
+        print(f"Input tensor size: {x.size()}, scale: {scale}")
+        # Fallback to direct forward pass if chopping fails
+        return model(x)
 
 def valid(scale) -> (float, float):
     model.eval()
@@ -230,11 +256,20 @@ def valid(scale) -> (float, float):
             hr_tensor = hr_tensor.to(device)
 
         with torch.no_grad():
-            pre = forward_chop(model, lr_tensor, scale)#model(lr_tensor)
+            try:
+                pre = forward_chop(model, lr_tensor, scale)
+            except Exception as e:
+                print(f"Error during validation: {str(e)}")
+                # Fallback to direct forward pass if forward_chop fails
+                pre = model(lr_tensor)
 
         sr_img = utils.tensor2np(pre.detach()[0])
         gt_img = utils.tensor2np(hr_tensor.detach()[0])
         crop_size = args.scale
+        
+        # Make sure we don't try to crop more than the image size
+        crop_size = min(crop_size, min(sr_img.shape[0], sr_img.shape[1], gt_img.shape[0], gt_img.shape[1]) // 2)
+        
         print("sr_img", sr_img.shape)
         print("gt_img", gt_img.shape)
         cropped_sr_img = utils.shave(sr_img, crop_size)
