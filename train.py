@@ -86,15 +86,25 @@ testset = Set5_val.DatasetFromFolderVal(
     "Test_Datasets/Set5/X{}/LR".format(args.scale),
     args.scale
 )
-training_data_loader = DataLoader(dataset=trainset, num_workers=args.threads, batch_size=args.batch_size, shuffle=True, pin_memory=True, drop_last=True)
-testing_data_loader = DataLoader(dataset=testset, num_workers=args.threads, batch_size=args.testBatchSize,
-                                 shuffle=False)
+training_data_loader = DataLoader(
+    dataset=trainset,
+    num_workers=8,
+    batch_size=args.batch_size,
+    shuffle=True,
+    pin_memory=True,
+    drop_last=True
+)
+testing_data_loader = DataLoader(
+    dataset=testset,
+    num_workers=0,
+    batch_size=args.testBatchSize,
+    shuffle=False
+)
 
 print("===> Building models")
 args.is_train = True
 
-
-model = esrt.ESRT(upscale = args.scale) #architecture.IMDN(upscale=args.scale)
+model = esrt.ESRT(upscale=args.scale)  # architecture.IMDN(upscale=args.scale)
 
 l1_criterion = nn.L1Loss()
 
@@ -122,6 +132,7 @@ if args.pretrained:
             if k not in pretrained_dict:
                 print(k)
         model.load_state_dict(pretrained_dict, strict=True)
+        print("===> Model loaded successfully!")
 
     else:
         print("===> no models found at '{}'".format(args.pretrained))
@@ -129,7 +140,8 @@ if args.pretrained:
 print("===> WANDB INIT AND SETUP")
 
 try:
-    wandb.login(key="6b8966b4154c1ea7f7b69ccc6e342b6d21e8b92d") # API Key is in your wandb account, under settings (wandb.ai/settings)
+    wandb.login(
+        key="6b8966b4154c1ea7f7b69ccc6e342b6d21e8b92d")  # API Key is in your wandb account, under settings (wandb.ai/settings)
 
     config = {
         'epoch': args.nEpochs,
@@ -138,14 +150,16 @@ try:
         'batch_size': args.batch_size
     }
 
+
+    # CAREFUL HERE!
     run = wandb.init(
         #  add name here for label
-        name = "attempt3", ## Wandb creates random run names if you skip this field
-        reinit = True, ### Allows reinitalizing runs when you re-run this cell
-        # run_id = ### Insert specific run id here if you want to resume a previous run
-        # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
-        project = "idls25-ESRT", ### Project should be created in your wandb account
-        config = config ### Wandb Config for your run
+        name="Set5-X3-attemp2",  ## Wandb creates random run names if you skip this field
+        # reinit = True, ### Allows reinitalizing runs when you re-run this cell
+        id='9tyq7s1g',  ### Insert specific run id here if you want to resume a previous run
+        resume="must",  ### You need this to resume previous runs, but comment out reinit = True when using this
+        project="idls25-ESRT",  ### Project should be created in your wandb account
+        config=config,  ### Wandb Config for your run
     )
     use_wandb = True
 except Exception as e:
@@ -164,7 +178,7 @@ def train(epoch) -> float:
     print('epoch =', epoch, 'lr = ', optimizer.param_groups[0]['lr'])
     total_loss = 0
     total_batches = 0
-    
+
     for iteration, (lr_tensor, hr_tensor) in enumerate(training_data_loader, 1):
         try:
             if args.cuda:
@@ -173,25 +187,25 @@ def train(epoch) -> float:
 
             optimizer.zero_grad()
             sr_tensor = model(lr_tensor)
-            
+
             # Handle size mismatch between sr_tensor and hr_tensor
             if sr_tensor.size() != hr_tensor.size():
-                print(f"Size mismatch - SR: {sr_tensor.size()}, HR: {hr_tensor.size()}")
+                # print(f"Size mismatch - SR: {sr_tensor.size()}, HR: {hr_tensor.size()}")
                 # Center crop both to the smaller dimension
                 min_h = min(sr_tensor.size(2), hr_tensor.size(2))
                 min_w = min(sr_tensor.size(3), hr_tensor.size(3))
-                
+
                 # Calculate offsets for center crop
                 sr_h_offset = (sr_tensor.size(2) - min_h) // 2
                 sr_w_offset = (sr_tensor.size(3) - min_w) // 2
                 hr_h_offset = (hr_tensor.size(2) - min_h) // 2
                 hr_w_offset = (hr_tensor.size(3) - min_w) // 2
-                
+
                 # Crop both tensors to same size
-                sr_tensor = sr_tensor[:, :, sr_h_offset:sr_h_offset+min_h, sr_w_offset:sr_w_offset+min_w]
-                hr_tensor = hr_tensor[:, :, hr_h_offset:hr_h_offset+min_h, hr_w_offset:hr_w_offset+min_w]
-                print(f"After cropping - SR: {sr_tensor.size()}, HR: {hr_tensor.size()}")
-            
+                sr_tensor = sr_tensor[:, :, sr_h_offset:sr_h_offset + min_h, sr_w_offset:sr_w_offset + min_w]
+                hr_tensor = hr_tensor[:, :, hr_h_offset:hr_h_offset + min_h, hr_w_offset:hr_w_offset + min_w]
+                # print(f"After cropping - SR: {sr_tensor.size()}, HR: {hr_tensor.size()}")
+
             loss_l1 = l1_criterion(sr_tensor, hr_tensor)
             loss_sr = loss_l1
             total_loss += loss_l1.item()
@@ -199,14 +213,15 @@ def train(epoch) -> float:
 
             loss_sr.backward()
             optimizer.step()
-            
-            if iteration % 100 == 0:
-                print("===> Epoch[{}]({}/{}): Loss_l1: {:.5f}".format(epoch, iteration, len(training_data_loader), loss_l1.item()))
+
+            if iteration % 10 == 0:
+                print("===> Epoch[{}]({}/{}): Loss_l1: {:.5f}".format(epoch, iteration, len(training_data_loader),
+                                                                      loss_l1.item()))
         except Exception as e:
             print(f"Error in training iteration {iteration}: {str(e)}")
             # Skip this batch and continue
             continue
-    
+
     # Return average loss, handle case where no batches were successfully processed
     if total_batches == 0:
         return 0.0
@@ -220,11 +235,11 @@ def forward_chop(model, x, scale, shave=10, min_size=60000):
         b, c, h, w = x.size()
         h_half, w_half = h // 2, w // 2
         h_size, w_size = h_half + shave, w_half + shave
-        
+
         # Make sure h_size and w_size don't exceed the image dimensions
         h_size = min(h, h_size)
         w_size = min(w, w_size)
-        
+
         # Create the four patches
         lr_list = [
             x[:, :, 0:h_size, 0:w_size],
@@ -248,41 +263,41 @@ def forward_chop(model, x, scale, shave=10, min_size=60000):
         h_out, w_out = scale * h, scale * w
         h_half_out, w_half_out = scale * h_half, scale * w_half
         h_size_out, w_size_out = scale * h_size, scale * w_size
-        
+
         # Create a new tensor directly instead of using x.new()
         output = torch.zeros(b, c, h_out, w_out, device=x.device)
-        
+
         # Ensure all dimensions are valid
         h_half_out = min(h_half_out, sr_list[0].size(2))
         w_half_out = min(w_half_out, sr_list[0].size(3))
-        
+
         # For top-left patch (0)
         output[:, :, 0:h_half_out, 0:w_half_out] = sr_list[0][:, :, 0:h_half_out, 0:w_half_out]
-        
+
         # For top-right patch (1)
         w_size_right = min(w_size_out, sr_list[1].size(3))
         right_offset = max(0, w_size_out - (w_out - w_half_out))
         right_slice_width = min(w_out - w_half_out, sr_list[1].size(3) - right_offset)
-        
-        output[:, :, 0:h_half_out, w_half_out:w_half_out+right_slice_width] = \
-            sr_list[1][:, :, 0:h_half_out, right_offset:right_offset+right_slice_width]
-        
+
+        output[:, :, 0:h_half_out, w_half_out:w_half_out + right_slice_width] = \
+            sr_list[1][:, :, 0:h_half_out, right_offset:right_offset + right_slice_width]
+
         # For bottom-left patch (2)
         h_size_bottom = min(h_size_out, sr_list[2].size(2))
         bottom_offset = max(0, h_size_out - (h_out - h_half_out))
         bottom_slice_height = min(h_out - h_half_out, sr_list[2].size(2) - bottom_offset)
-        
-        output[:, :, h_half_out:h_half_out+bottom_slice_height, 0:w_half_out] = \
-            sr_list[2][:, :, bottom_offset:bottom_offset+bottom_slice_height, 0:w_half_out]
-        
+
+        output[:, :, h_half_out:h_half_out + bottom_slice_height, 0:w_half_out] = \
+            sr_list[2][:, :, bottom_offset:bottom_offset + bottom_slice_height, 0:w_half_out]
+
         # For bottom-right patch (3)
         # Ensure we don't go out of bounds with carefully calculated slice dimensions
         bottom_right_h = min(h_out - h_half_out, sr_list[3].size(2) - bottom_offset)
         bottom_right_w = min(w_out - w_half_out, sr_list[3].size(3) - right_offset)
-        
-        output[:, :, h_half_out:h_half_out+bottom_right_h, w_half_out:w_half_out+bottom_right_w] = \
-            sr_list[3][:, :, bottom_offset:bottom_offset+bottom_right_h, right_offset:right_offset+bottom_right_w]
-        
+
+        output[:, :, h_half_out:h_half_out + bottom_right_h, w_half_out:w_half_out + bottom_right_w] = \
+            sr_list[3][:, :, bottom_offset:bottom_offset + bottom_right_h, right_offset:right_offset + bottom_right_w]
+
         return output
     except Exception as e:
         print(f"Error in forward_chop: {str(e)}")
@@ -296,7 +311,7 @@ def valid(scale) -> (float, float):
 
     avg_psnr, avg_ssim = 0, 0
     valid_samples = 0
-    
+
     for batch_idx, batch in enumerate(testing_data_loader):
         try:
             lr_tensor, hr_tensor = batch[0], batch[1]
@@ -315,48 +330,48 @@ def valid(scale) -> (float, float):
 
             # Handle size mismatch between SR and HR tensors
             if pre.size() != hr_tensor.size():
-                print(f"Sample {batch_idx}: Size mismatch - SR: {pre.size()}, HR: {hr_tensor.size()}")
+                # print(f"Sample {batch_idx}: Size mismatch - SR: {pre.size()}, HR: {hr_tensor.size()}")
                 min_h = min(pre.size(2), hr_tensor.size(2))
                 min_w = min(pre.size(3), hr_tensor.size(3))
-                
+
                 # Calculate offsets for center crop
                 sr_h_offset = (pre.size(2) - min_h) // 2
                 sr_w_offset = (pre.size(3) - min_w) // 2
                 hr_h_offset = (hr_tensor.size(2) - min_h) // 2
                 hr_w_offset = (hr_tensor.size(3) - min_w) // 2
-                
+
                 # Apply center crop
-                pre = pre[:, :, sr_h_offset:sr_h_offset+min_h, sr_w_offset:sr_w_offset+min_w]
-                hr_tensor = hr_tensor[:, :, hr_h_offset:hr_h_offset+min_h, hr_w_offset:hr_w_offset+min_w]
-                print(f"After cropping - SR: {pre.size()}, HR: {hr_tensor.size()}")
+                pre = pre[:, :, sr_h_offset:sr_h_offset + min_h, sr_w_offset:sr_w_offset + min_w]
+                hr_tensor = hr_tensor[:, :, hr_h_offset:hr_h_offset + min_h, hr_w_offset:hr_w_offset + min_w]
+                # print(f"After cropping - SR: {pre.size()}, HR: {hr_tensor.size()}")
 
             # Convert to numpy for evaluation
             sr_img = utils.tensor2np(pre.detach()[0])
             gt_img = utils.tensor2np(hr_tensor.detach()[0])
-            
+
             # Ensure images have matching dimensions
             if sr_img.shape != gt_img.shape:
-                print(f"Shape mismatch after numpy conversion - SR: {sr_img.shape}, GT: {gt_img.shape}")
+                # print(f"Shape mismatch after numpy conversion - SR: {sr_img.shape}, GT: {gt_img.shape}")
                 # Find minimum dimensions
                 min_h = min(sr_img.shape[0], gt_img.shape[0])
                 min_w = min(sr_img.shape[1], gt_img.shape[1])
                 # Crop to minimum size
                 sr_img = sr_img[:min_h, :min_w, :]
                 gt_img = gt_img[:min_h, :min_w, :]
-            
+
             crop_size = args.scale
-            
+
             # Make sure we don't try to crop more than the image size
             crop_size = min(crop_size, min(sr_img.shape[0], sr_img.shape[1], gt_img.shape[0], gt_img.shape[1]) // 2)
-            
-            print(f"Sample {batch_idx}: sr_img shape: {sr_img.shape}, gt_img shape: {gt_img.shape}")
-            
+
+            # print(f"Sample {batch_idx}: sr_img shape: {sr_img.shape}, gt_img shape: {gt_img.shape}")
+
             # Apply shave/crop
             cropped_sr_img = utils.shave(sr_img, crop_size)
             cropped_gt_img = utils.shave(gt_img, crop_size)
-            
-            print(f"After shave: cropped_sr_img shape: {cropped_sr_img.shape}, cropped_gt_img shape: {cropped_gt_img.shape}")
-            
+
+            # print(f"After shave: cropped_sr_img shape: {cropped_sr_img.shape}, cropped_gt_img shape: {cropped_gt_img.shape}")
+
             # Process for Y channel comparison if needed
             if args.isY is True:
                 try:
@@ -369,19 +384,19 @@ def valid(scale) -> (float, float):
             else:
                 im_label = cropped_gt_img
                 im_pre = cropped_sr_img
-                
+
             # Final shape check before computing metrics
             if im_pre.shape != im_label.shape:
-                print(f"Shape mismatch before PSNR computation - im_pre: {im_pre.shape}, im_label: {im_label.shape}")
+                # print(f"Shape mismatch before PSNR computation - im_pre: {im_pre.shape}, im_label: {im_label.shape}")
                 # Find common dimensions
                 min_h = min(im_pre.shape[0], im_label.shape[0])
                 min_w = min(im_pre.shape[1], im_label.shape[1])
                 # Crop both to common size
                 im_pre = im_pre[:min_h, :min_w]
                 im_label = im_label[:min_h, :min_w]
-                
-            print(f"Final shapes - im_pre: {im_pre.shape}, im_label: {im_label.shape}")
-            
+
+            # print(f"Final shapes - im_pre: {im_pre.shape}, im_label: {im_label.shape}")
+
             # Only compute metrics if we have valid images
             if im_pre.size > 0 and im_label.size > 0 and im_pre.shape == im_label.shape:
                 try:
@@ -390,23 +405,23 @@ def valid(scale) -> (float, float):
                     avg_psnr += psnr_val
                     avg_ssim += ssim_val
                     valid_samples += 1
-                    print(f"Sample {batch_idx}: PSNR = {psnr_val:.4f}, SSIM = {ssim_val:.4f}")
+                    # print(f"Sample {batch_idx}: PSNR = {psnr_val:.4f}, SSIM = {ssim_val:.4f}")
                 except Exception as e:
                     print(f"Error computing metrics: {str(e)}")
                     # Continue to next sample
                     continue
             else:
                 print(f"Sample {batch_idx}: Skipping metrics computation due to invalid shapes")
-                
+
         except Exception as e:
             print(f"Error during validation of sample {batch_idx}: {str(e)}")
             # Continue to the next batch
             continue
-            
+
     if valid_samples == 0:
         print("Warning: No valid samples for evaluation")
         return 0.0, 0.0
-        
+
     avg_psnr /= valid_samples
     avg_ssim /= valid_samples
     print("===> Valid. psnr: {:.4f}, ssim: {:.4f}, valid samples: {}".format(
@@ -443,12 +458,24 @@ def save_best_ssim():
 
     print("===> BEST SSIM Checkpoint saved to {}".format(model_out_path))
 
+
+def save_last_epoch():
+    model_folder = "experiment/checkpoint_ESRT_x{}/".format(args.scale)
+    model_out_path = model_folder + "last_epoch.pth"
+    if not os.path.exists(model_folder):
+        os.makedirs(model_folder)
+    torch.save(model.state_dict(), model_out_path)
+
+    print("===> LAST EPOCH Checkpoint saved to {}".format(model_out_path))
+
+
 def print_network(net):
     num_params = 0
     for param in net.parameters():
         num_params += param.numel()
     # print(net)
     print('Total number of parameters: %d' % num_params)
+
 
 print("===> Training")
 print_network(model)
@@ -459,14 +486,14 @@ best_ssim = 0
 for epoch in range(args.start_epoch, args.nEpochs + 1):
     t_epoch_start = timer.t()
     epoch_start = datetime.datetime.now()
-    
+
     try:
         # Validate first
         psnr, ssim = valid(args.scale)
-        
+
         # Then train
         train_loss_for_epoch = train(epoch)
-        
+
         # Save checkpoint periodically
         if epoch % 10 == 0:
             save_checkpoint(epoch)
@@ -480,14 +507,17 @@ for epoch in range(args.start_epoch, args.nEpochs + 1):
             best_ssim = ssim
             save_best_ssim()
 
+        save_last_epoch()
+
         # Log timing info
         epoch_end = datetime.datetime.now()
-        print('Epoch cost times: %s' % str(epoch_end-epoch_start))
+        print('Epoch cost times: %s' % str(epoch_end - epoch_start))
         t = timer.t()
-        prog = (epoch-args.start_epoch+1)/(args.nEpochs + 1 - args.start_epoch + 1)
+        prog = (epoch - args.start_epoch + 1) / (args.nEpochs + 1 - args.start_epoch + 1)
         t_epoch = utils.time_text(t - t_epoch_start)
         t_elapsed, t_all = utils.time_text(t), utils.time_text(t / prog)
-        
+
+        # todo: add LR too
         # Log metrics
         metrics = {
             'time_elapsed': t_elapsed,
@@ -496,20 +526,21 @@ for epoch in range(args.start_epoch, args.nEpochs + 1):
             'psnr': psnr,
             'ssim': ssim
         }
-        
+
         # Log to wandb if available
         if use_wandb:
             try:
                 run.log(metrics)
+                print("logged epoch: " + epoch)
             except Exception as e:
                 print(f"Error logging to wandb: {str(e)}")
-        
+
         print('{} {}/{}'.format(t_epoch, t_elapsed, t_all))
-        
+
     except Exception as e:
         print(f"Error in epoch {epoch}: {str(e)}")
         # Continue to next epoch
         continue
 
 code_end = datetime.datetime.now()
-print('Code cost times: %s' % str(code_end-code_start))
+print('Code cost times: %s' % str(code_end - code_start))
