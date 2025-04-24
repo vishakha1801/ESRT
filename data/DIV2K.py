@@ -23,7 +23,8 @@ def is_image_file(filename):
 
 def make_dataset(dir):
     images = []
-    dir = dir
+    dir = base_path + dir
+    print(dir)
     assert os.path.isdir(dir), '%s is not a valid directory' % dir
 
     for root, _, fnames in sorted(os.walk(dir)):
@@ -44,6 +45,8 @@ class div2k(data.Dataset):
         self.repeat = 10#self.opt.test_every // (self.opt.n_train // self.opt.batch_size)
         self._set_filesystem(self.root)
         self.images_hr, self.images_lr = self._scan()
+        # Set standard size for patches
+        self.standard_size = (self.opt.patch_size // self.scale) * self.scale
 
     def _set_filesystem(self, dir_data):
         self.root = dir_data + '/DF2K_decoded'
@@ -71,13 +74,46 @@ class div2k(data.Dataset):
         patch_size = self.opt.patch_size
         scale = self.scale
         if self.train:
-            img_in, img_tar = common.get_patch(
-                img_in, img_tar, patch_size=patch_size, scale=scale)
-            img_in, img_tar = common.augment(img_in, img_tar)
-        else:
+            # Get standardized patch
+            input_size = patch_size // scale
+            
             ih, iw = img_in.shape[:2]
-            img_tar = img_tar[0:ih * scale, 0:iw * scale, :]
-        return img_in, img_tar
+            
+            # Make sure we can get a valid patch
+            if ih < input_size or iw < input_size:
+                # Pad the image if too small
+                pad_h = max(0, input_size - ih)
+                pad_w = max(0, input_size - iw)
+                padding = ((0, pad_h), (0, pad_w), (0, 0))
+                img_in = np.pad(img_in, padding, mode='constant')
+                img_tar = np.pad(img_tar, ((0, pad_h*scale), (0, pad_w*scale), (0, 0)), mode='constant')
+                ih, iw = img_in.shape[:2]
+            
+            # Get random patch position
+            ix = np.random.randint(0, max(0, iw - input_size) + 1)
+            iy = np.random.randint(0, max(0, ih - input_size) + 1)
+            
+            # Extract patches with exact dimensions
+            input_patch = img_in[iy:iy + input_size, ix:ix + input_size, :]
+            target_patch = img_tar[iy*scale:(iy+input_size)*scale, ix*scale:(ix+input_size)*scale, :]
+            
+            # Apply augmentation
+            input_patch, target_patch = common.augment(input_patch, target_patch)
+            
+            return input_patch, target_patch
+        else:
+            # For validation, make dimensions consistent
+            ih, iw = img_in.shape[:2]
+            
+            # Make dimensions divisible by scale
+            new_h = (ih // scale) * scale
+            new_w = (iw // scale) * scale
+            
+            # Crop to consistent size
+            img_in = img_in[:new_h // scale, :new_w // scale, :]
+            img_tar = img_tar[:new_h, :new_w, :]
+            
+            return img_in, img_tar
 
     def _scan(self):
         list_hr = sorted(make_dataset(self.dir_hr))

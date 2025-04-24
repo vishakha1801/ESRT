@@ -7,7 +7,8 @@ from collections import OrderedDict
 
 import time
 
-base_path = '/home/sagemaker-user/ESRT/'
+# base_path = '/home/sagemaker-user/ESRT/'
+base_path = '/Users/nisheet/Desktop/Studies/Introduction to Deep Learning/project/model_impl/ESRT/'
 
 class Timer():
 

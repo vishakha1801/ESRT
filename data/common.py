@@ -40,7 +40,8 @@ def set_channel(*args, n_channels=3):
 def np2Tensor(*args, rgb_range):
     def _np2Tensor(img):
         np_transpose = np.ascontiguousarray(img.transpose((2, 0, 1)))
-        tensor = torch.from_numpy(np_transpose).float()
+        # Use torch.tensor instead of torch.from_numpy to avoid shared storage
+        tensor = torch.tensor(np_transpose, dtype=torch.float32)
         tensor.mul_(rgb_range / 255)
 
         return tensor
@@ -61,4 +62,3 @@ def augment(*args, hflip=True, rot=True):
         return img
 
     return [_augment(a) for a in args]
-
